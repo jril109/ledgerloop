@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 export default auth((req) => {
   if (req.auth) return NextResponse.next();
-  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  return NextResponse.redirect(new URL('/', req.url), 307);
 });
 
 export const config = {
