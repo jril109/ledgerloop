@@ -49,159 +49,125 @@ export interface DataFile {
   tier: "free" | "byo" | "managed";
 }
 
-// ─── Validation ───────────────────────────────────────────────────────────────
+// ─── Structured errors ────────────────────────────────────────────────────────
 
-export interface ParseError {
-  field: string;
-  message: string;
-}
+export type SchemaErrorCode =
+  | "INVALID_JSON"
+  | "INVALID_SCHEMA"
+  | "INVALID_MONTH_KEY"
+  | "UNKNOWN_VERSION";
 
-export class DataFileParseError extends Error {
-  constructor(public readonly errors: ParseError[]) {
-    super(`DataFile validation failed: ${errors.map((e) => `${e.field}: ${e.message}`).join("; ")}`);
-    this.name = "DataFileParseError";
+export class SchemaError extends Error {
+  constructor(
+    public readonly code: SchemaErrorCode,
+    message: string,
+    public readonly path?: string,
+  ) {
+    super(message);
+    this.name = "SchemaError";
   }
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 const MONTH_KEY_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
-const EXPENSE_CATEGORIES = new Set<string>([
-  "Housing", "Food", "Transport", "Utilities",
-  "Health", "Entertainment", "Personal", "Other",
-]);
+const VALID_TIERS = new Set<string>(["free", "byo", "managed"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function validatePerson(value: unknown, path: string, errors: ParseError[]): void {
-  if (!isRecord(value)) { errors.push({ field: path, message: "must be an object" }); return; }
-  if (typeof value.id !== "string") errors.push({ field: `${path}.id`, message: "must be a string" });
-  if (typeof value.name !== "string") errors.push({ field: `${path}.name`, message: "must be a string" });
-  if (typeof value.title !== "string") errors.push({ field: `${path}.title`, message: "must be a string" });
-}
+// ─── parseDataFile ────────────────────────────────────────────────────────────
 
-function validateIncomeEntry(value: unknown, path: string, errors: ParseError[]): void {
-  if (!isRecord(value)) { errors.push({ field: path, message: "must be an object" }); return; }
-  if (typeof value.id !== "string") errors.push({ field: `${path}.id`, message: "must be a string" });
-  if (typeof value.label !== "string") errors.push({ field: `${path}.label`, message: "must be a string" });
-  if (typeof value.amount !== "number") errors.push({ field: `${path}.amount`, message: "must be a number" });
-}
-
-function validateExpenseEntry(value: unknown, path: string, errors: ParseError[]): void {
-  if (!isRecord(value)) { errors.push({ field: path, message: "must be an object" }); return; }
-  if (typeof value.id !== "string") errors.push({ field: `${path}.id`, message: "must be a string" });
-  if (typeof value.label !== "string") errors.push({ field: `${path}.label`, message: "must be a string" });
-  if (typeof value.amount !== "number") errors.push({ field: `${path}.amount`, message: "must be a number" });
-  if (typeof value.category !== "string" || !EXPENSE_CATEGORIES.has(value.category)) {
-    errors.push({ field: `${path}.category`, message: `must be one of: ${[...EXPENSE_CATEGORIES].join(", ")}` });
-  }
-  if (value.personId !== null && typeof value.personId !== "string") {
-    errors.push({ field: `${path}.personId`, message: "must be a string or null" });
-  }
-}
-
-function validateMonthData(value: unknown, path: string, errors: ParseError[]): void {
-  if (!isRecord(value)) { errors.push({ field: path, message: "must be an object" }); return; }
-
-  if (!isRecord(value.income)) {
-    errors.push({ field: `${path}.income`, message: "must be an object" });
-  } else {
-    for (const [personId, entries] of Object.entries(value.income)) {
-      if (!Array.isArray(entries)) {
-        errors.push({ field: `${path}.income.${personId}`, message: "must be an array" });
-      } else {
-        entries.forEach((entry, i) => validateIncomeEntry(entry, `${path}.income.${personId}[${i}]`, errors));
-      }
-    }
-  }
-
-  if (!Array.isArray(value.expenses)) {
-    errors.push({ field: `${path}.expenses`, message: "must be an array" });
-  } else {
-    value.expenses.forEach((entry, i) => validateExpenseEntry(entry, `${path}.expenses[${i}]`, errors));
-  }
-}
-
-function validateUserPreferences(value: unknown, path: string, errors: ParseError[]): void {
-  if (!isRecord(value)) { errors.push({ field: path, message: "must be an object" }); return; }
-  if (typeof value.darkMode !== "boolean") {
-    errors.push({ field: `${path}.darkMode`, message: "must be a boolean" });
-  }
-}
-
-/**
- * Parse and validate a raw JSON string into a DataFile.
- * Throws DataFileParseError with structured field errors on failure.
- */
 export function parseDataFile(raw: string): DataFile {
-  const errors: ParseError[] = [];
-
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new DataFileParseError([{ field: "root", message: "invalid JSON" }]);
+    throw new SchemaError("INVALID_JSON", "Failed to parse JSON");
   }
 
   if (!isRecord(parsed)) {
-    throw new DataFileParseError([{ field: "root", message: "must be an object" }]);
+    throw new SchemaError("INVALID_SCHEMA", "Root value must be a plain object");
   }
 
+  // Version must be checked before other fields so the caller gets UNKNOWN_VERSION
+  // rather than INVALID_SCHEMA when the payload is otherwise well-formed.
+  if (!("version" in parsed)) {
+    throw new SchemaError("INVALID_SCHEMA", "Missing required field: version");
+  }
   if (parsed.version !== 1) {
-    errors.push({ field: "version", message: "must be 1" });
+    throw new SchemaError(
+      "UNKNOWN_VERSION",
+      `Unsupported schema version: ${String(parsed.version)}`,
+    );
+  }
+
+  for (const field of [
+    "householdName",
+    "people",
+    "months",
+    "preferences",
+    "tier",
+  ] as const) {
+    if (!(field in parsed)) {
+      throw new SchemaError(
+        "INVALID_SCHEMA",
+        `Missing required field: ${field}`,
+      );
+    }
   }
 
   if (typeof parsed.householdName !== "string") {
-    errors.push({ field: "householdName", message: "must be a string" });
+    throw new SchemaError("INVALID_SCHEMA", "householdName must be a string");
   }
 
   if (!Array.isArray(parsed.people)) {
-    errors.push({ field: "people", message: "must be an array" });
-  } else {
-    parsed.people.forEach((p, i) => validatePerson(p, `people[${i}]`, errors));
+    throw new SchemaError("INVALID_SCHEMA", "people must be an array");
   }
 
   if (!isRecord(parsed.months)) {
-    errors.push({ field: "months", message: "must be an object" });
-  } else {
-    for (const [key, monthData] of Object.entries(parsed.months)) {
-      if (!MONTH_KEY_RE.test(key)) {
-        errors.push({ field: `months.${key}`, message: "key must be in YYYY-MM format" });
-      }
-      validateMonthData(monthData, `months.${key}`, errors);
+    throw new SchemaError("INVALID_SCHEMA", "months must be a plain object");
+  }
+
+  for (const key of Object.keys(parsed.months)) {
+    if (!MONTH_KEY_RE.test(key)) {
+      throw new SchemaError(
+        "INVALID_MONTH_KEY",
+        `Invalid month key "${key}": expected YYYY-MM format`,
+        `months.${key}`,
+      );
     }
   }
 
   if (!isRecord(parsed.preferences)) {
-    errors.push({ field: "preferences", message: "must be an object" });
-  } else {
-    for (const [sub, prefs] of Object.entries(parsed.preferences)) {
-      validateUserPreferences(prefs, `preferences.${sub}`, errors);
-    }
+    throw new SchemaError(
+      "INVALID_SCHEMA",
+      "preferences must be a plain object",
+    );
   }
 
-  if (parsed.tier !== "free" && parsed.tier !== "byo" && parsed.tier !== "managed") {
-    errors.push({ field: "tier", message: 'must be "free", "byo", or "managed"' });
-  }
-
-  if (errors.length > 0) {
-    throw new DataFileParseError(errors);
+  if (
+    typeof parsed.tier !== "string" ||
+    !VALID_TIERS.has(parsed.tier)
+  ) {
+    throw new SchemaError(
+      "INVALID_SCHEMA",
+      'tier must be one of: "free", "byo", "managed"',
+    );
   }
 
   return parsed as unknown as DataFile;
 }
 
-/**
- * Migrate a DataFile to the latest version.
- * Version 1 is the current latest — this is a no-op.
- * Future versions add migration steps here before the return.
- */
+// ─── migrateDataFile ──────────────────────────────────────────────────────────
+
 export function migrateDataFile(file: DataFile): DataFile {
   if (file.version === 1) {
     return file;
   }
-  // Exhaustiveness check — TypeScript will error here if a new version
-  // is added to the union without a migration branch.
+  // Exhaustiveness guard — TypeScript will error here when a new version
+  // is added to the DataFile union without a migration branch.
   const _exhaustive: never = file.version;
   return _exhaustive;
 }
