@@ -188,7 +188,7 @@ export function parseDataFile(raw: string): DataFile {
     throw new DataFileParseError(errors);
   }
 
-  return parsed as DataFile;
+  return parsed as unknown as DataFile;
 }
 
 /**
