@@ -8,7 +8,7 @@ export default auth((req) => {
 
 export const config = {
   matcher: [
-    // Protect all routes except auth endpoints, sign-in page, Next.js internals, and favicon
-    "/((?!api/auth|_next/static|_next/image|favicon\\.ico|sign-in).*)",
+    // Protect all routes except the public landing page, auth endpoints, sign-in, Next.js internals, and favicon
+    "/((?!$|api/auth|_next/static|_next/image|favicon\\.ico|sign-in).*)",
   ],
 };
