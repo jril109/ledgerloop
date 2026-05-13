@@ -1,18 +1,26 @@
 import { auth, signOut } from "@/auth";
 import { redirect } from "next/navigation";
+import type { MonthData } from "@/lib/schema";
+import { DashboardView } from "@/components/dashboard/DashboardView";
+
+function currentMonthKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
 
 export default async function DashboardPage() {
   const session = await auth();
   if (!session) redirect("/sign-in");
 
+  const activeMonth = currentMonthKey();
+  const monthData: MonthData = {
+    income: {},
+    expenses: [],
+  };
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-gray-50 p-8">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm">
-        <h1 className="mb-2 text-xl font-semibold text-gray-900">Dashboard</h1>
-        <p className="mb-1 text-sm text-gray-500">
-          Signed in as <span className="font-medium text-gray-700">{session.user?.email}</span>
-        </p>
-        <p className="mb-6 text-xs text-gray-400">User ID: {session.user?.id}</p>
+    <div className="relative bg-gray-50 dark:bg-gray-950">
+      <div className="absolute right-4 top-4 z-10 sm:right-6 sm:top-6">
         <form
           action={async () => {
             "use server";
@@ -21,12 +29,18 @@ export default async function DashboardPage() {
         >
           <button
             type="submit"
-            className="w-full rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+            className="min-h-11 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
           >
             Sign out
           </button>
         </form>
       </div>
-    </main>
+      <DashboardView
+        monthData={monthData}
+        availableMonths={[activeMonth]}
+        activeMonth={activeMonth}
+        householdName="Your household"
+      />
+    </div>
   );
 }
