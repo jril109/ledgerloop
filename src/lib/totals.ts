@@ -10,6 +10,23 @@ export function totalIncome(month: MonthData): number {
   return sum;
 }
 
+export function personIncomeTotal(
+  month: MonthData,
+  personId: string,
+): number {
+  const entries = month.income[personId];
+  if (!entries) return 0;
+  let sum = 0;
+  for (const entry of entries) {
+    sum += entry.amount;
+  }
+  return sum;
+}
+
+export function householdIncomeTotal(month: MonthData): number {
+  return totalIncome(month);
+}
+
 export function totalExpenses(month: MonthData): number {
   let sum = 0;
   for (const entry of month.expenses) {

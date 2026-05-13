@@ -11,6 +11,8 @@ interface DashboardViewProps {
   availableMonths: string[];
   activeMonth: string;
   householdName: string;
+  selectedMonth?: string;
+  onSelectedMonthChange?: (month: string) => void;
 }
 
 const CURRENCY_FORMATTER = new Intl.NumberFormat("en-US", {
@@ -28,8 +30,12 @@ export function DashboardView({
   availableMonths,
   activeMonth,
   householdName,
+  selectedMonth: controlledMonth,
+  onSelectedMonthChange,
 }: DashboardViewProps) {
-  const [selectedMonth, setSelectedMonth] = useState<string>(activeMonth);
+  const [internalMonth, setInternalMonth] = useState<string>(activeMonth);
+  const selectedMonth = controlledMonth ?? internalMonth;
+  const setSelectedMonth = onSelectedMonthChange ?? setInternalMonth;
 
   const income = totalIncome(monthData);
   const expenses = totalExpenses(monthData);
