@@ -7,19 +7,27 @@ import {
   timingSafeEqual,
 } from "crypto";
 
-const KEY_HEX = process.env.ENCRYPTION_KEY ?? "";
-if (!/^[0-9a-f]{64}$/i.test(KEY_HEX)) {
-  throw new Error("ENCRYPTION_KEY must be a 64-character hex string");
+let cachedKeys: { aesKey: Buffer; hmacKey: Buffer } | null = null;
+
+function getKeys(): { aesKey: Buffer; hmacKey: Buffer } {
+  if (cachedKeys) return cachedKeys;
+
+  const keyHex = process.env.ENCRYPTION_KEY ?? "";
+  if (!/^[0-9a-f]{64}$/i.test(keyHex)) {
+    throw new Error("ENCRYPTION_KEY must be a 64-character hex string");
+  }
+
+  const masterKeyBuf = Buffer.from(keyHex, "hex");
+  cachedKeys = {
+    aesKey: Buffer.from(
+      hkdfSync("sha256", masterKeyBuf, "", "ledgerloop-aes", 32)
+    ),
+    hmacKey: Buffer.from(
+      hkdfSync("sha256", masterKeyBuf, "", "ledgerloop-hmac", 32)
+    ),
+  };
+  return cachedKeys;
 }
-
-const masterKeyBuf = Buffer.from(KEY_HEX, "hex");
-
-const aesKey = Buffer.from(
-  hkdfSync("sha256", masterKeyBuf, "", "ledgerloop-aes", 32)
-);
-const hmacKey = Buffer.from(
-  hkdfSync("sha256", masterKeyBuf, "", "ledgerloop-hmac", 32)
-);
 
 const IV_LEN = 12;
 const TAG_LEN = 16;
@@ -27,6 +35,7 @@ const HMAC_LEN = 32;
 const MIN_LEN = IV_LEN + TAG_LEN + HMAC_LEN; // 60
 
 export function encrypt(plaintext: string): string {
+  const { aesKey, hmacKey } = getKeys();
   const iv = randomBytes(IV_LEN);
   const cipher = createCipheriv("aes-256-gcm", aesKey, iv);
   const encrypted = Buffer.concat([
@@ -35,7 +44,6 @@ export function encrypt(plaintext: string): string {
   ]);
   const authTag = cipher.getAuthTag();
 
-  // body = iv || ciphertext || authTag
   const body = Buffer.concat([iv, encrypted, authTag]);
   const hmac = createHmac("sha256", hmacKey).update(body).digest();
 
@@ -43,6 +51,7 @@ export function encrypt(plaintext: string): string {
 }
 
 export function decrypt(ciphertext: string): string {
+  const { aesKey, hmacKey } = getKeys();
   const blob = Buffer.from(ciphertext, "base64");
 
   if (blob.length < MIN_LEN) {
